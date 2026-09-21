@@ -1,34 +1,46 @@
-# Import Flask application class and helper objects for handling requests and JSON
-from flask import Flask, request, jsonify
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 from uuid import uuid4
-# Import the function that sends a user's message to the chatbot and returns a reply
+
 from chatbot import interpret_message
-# Import helper utilities for checking availability and booking appointments
 
+app = FastAPI(title="Doctor Chatbot API")
 
-# Create a Flask application instance using the current module's name
-app = Flask(__name__)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:4200", "http://127.0.0.1:4200"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 conversations = {}
 
 
-# Define an HTTP POST endpoint at /chat that accepts JSON payloads
-@app.route("/chat", methods=["POST"])
-def chat():
-    # Read the incoming JSON and extract the 'message' field sent by the client
-    payload = request.get_json(silent=True) or {}
-    user_message = payload.get("message")
-    if not user_message:
-        return jsonify({"error": "The 'message' field is required."}), 400
-    conversation_id = payload.get("conversation_id") or str(uuid4())
+class ChatRequest(BaseModel):
+    message: str
+    conversation_id: str | None = None
+
+
+@app.post("/chat")
+def chat(payload: ChatRequest):
+    if not payload.message or not payload.message.strip():
+        raise HTTPException(status_code=400, detail="The 'message' field is required.")
+
+    conversation_id = payload.conversation_id or str(uuid4())
     conversation = conversations.setdefault(conversation_id, [])
-    
-    # Send the user's message to the chatbot interpreter and capture its reply
-    reply = interpret_message(user_message, conversation)
-    # Return the chatbot reply as a JSON object with key 'reply'
-    return jsonify({"conversation_id": conversation_id, "reply": reply})
+
+    try:
+        reply = interpret_message(payload.message, conversation)
+        return {
+            "conversation_id": conversation_id,
+            "reply": reply,
+        }
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
-# If this module is executed directly (not imported), start the Flask dev server
-if __name__ == "__main__":
-    # Run with debug=True for auto-reload and better error messages during development
-    app.run(debug=True)
+@app.get("/")
+def home():
+    return {"message": "Doctor Chatbot API is running"}
